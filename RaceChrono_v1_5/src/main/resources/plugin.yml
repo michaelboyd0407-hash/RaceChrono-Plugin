@@ -1,0 +1,22 @@
+name: RaceChrono
+main: com.mboyd.racechrono.RaceChrono
+version: 1.5.0
+api-version: '1.20'
+commands:
+  racechrono:
+    description: RaceChrono base command
+    usage: /racechrono help
+    aliases: [rc]
+permissions:
+  racechrono.admin:
+    default: op
+    description: Full control of RaceChrono
+  racechrono.editor:
+    default: false
+    description: Create and edit/delete only tracks you own
+  racechrono.sign:
+    default: op
+    description: Bind/unbind signs to tracks
+  racechrono.use:
+    default: true
+    description: Participate in races
