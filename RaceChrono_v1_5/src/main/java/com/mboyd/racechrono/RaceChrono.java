@@ -28,6 +28,7 @@ public class RaceChrono extends JavaPlugin implements Listener {
     static class Track {
         String name;
         java.util.UUID owner;
+        String description;
         Mode mode = Mode.P2P;
         LineGate startLine;
         LineGate finishLine;
@@ -72,10 +73,11 @@ public class RaceChrono extends JavaPlugin implements Listener {
 
         Objects.requireNonNull(getCommand("racechrono")).setExecutor((sender, cmd, label, args) -> {
             if (args.length == 0 || args[0].equalsIgnoreCase("help")) {
-                sender.sendMessage(ChatColor.YELLOW + "RaceChrono v1.4 — /rc help");
+                sender.sendMessage(ChatColor.YELLOW + "RaceChrono v1.5 — /rc help");
                 sender.sendMessage(cmd("/rc tracks list","list tracks"));
                 sender.sendMessage(cmd("/rc tracks create <name...>","create track (you own it)"));
                 sender.sendMessage(cmd("/rc tracks delete <name...>","delete track (owner/admin)"));
+                sender.sendMessage(cmd("/rc tracks info <name...>","track details"));
                 sender.sendMessage(cmd("/rc mode <P2P|CIRCUIT> [name...]","set mode"));
                 sender.sendMessage(cmd("/rc setlaps <n> [name...]","set laps (circuit)"));
                 sender.sendMessage(cmd("/rc setstartline [name...]","set start (two-step)"));
@@ -83,8 +85,12 @@ public class RaceChrono extends JavaPlugin implements Listener {
                 sender.sendMessage(cmd("/rc setgate [radius] [name...]","set circuit gate (cube)"));
                 sender.sendMessage(cmd("/rc addsplit [radius] [name...]","add split (cube)"));
                 sender.sendMessage(cmd("/rc clearsplits [name...]","clear splits"));
+                sender.sendMessage(cmd("/rc setdesc <track...> | <description>","set track description"));
+                sender.sendMessage(cmd("/rc cleardesc [name...]","clear track description"));
                 sender.sendMessage(cmd("/rc settimeout <sec>","timeout (global)"));
                 sender.sendMessage(cmd("/rc setprecision <1|2|3>","display decimals"));
+                sender.sendMessage(cmd("/rc best <name...>","show track best"));
+                sender.sendMessage(cmd("/rc top <name...>","show track leaderboard"));
                 sender.sendMessage(cmd("/rc sign bindbest <name...>","bind best sign"));
                 sender.sendMessage(cmd("/rc sign bindtop <name...>","bind top-3 sign"));
                 sender.sendMessage(cmd("/rc sign bindlatest <name...>","bind latest sign"));
@@ -95,12 +101,17 @@ public class RaceChrono extends JavaPlugin implements Listener {
             String sub = args[0].toLowerCase(java.util.Locale.ROOT);
             switch (sub) {
                 case "tracks" -> {
-                    if (args.length < 2) { sender.sendMessage(ChatColor.RED + "Usage: /rc tracks <list|create|delete> [name...]"); return true; }
+                    if (args.length < 2) { sender.sendMessage(ChatColor.RED + "Usage: /rc tracks <list|create|delete|info> [name...]"); return true; }
                     String op = args[1].toLowerCase(java.util.Locale.ROOT);
                     String w = (sender instanceof Player p) ? p.getWorld().getName() : Bukkit.getWorlds().get(0).getName();
                     WorldData wd = getWD(w);
                     if (op.equals("list")) {
-                        sender.sendMessage(ChatColor.AQUA + "Tracks in " + w + ": " + (wd.tracks.isEmpty() ? "(none)" : String.join(", ", wd.tracks.keySet())));
+                        if (wd.tracks.isEmpty()) { sender.sendMessage(ChatColor.AQUA + "Tracks in " + w + ": " + ChatColor.GRAY + "(none)"); return true; }
+                        sender.sendMessage(ChatColor.AQUA + "Tracks in " + w + ":");
+                        for (Track t : wd.tracks.values()) {
+                            sender.sendMessage(summaryLine(t));
+                            if (t.description != null && !t.description.isBlank()) sender.sendMessage(ChatColor.DARK_GRAY + "   " + t.description);
+                        }
                         return true;
                     }
                     if (op.equals("create")) {
@@ -119,6 +130,12 @@ public class RaceChrono extends JavaPlugin implements Listener {
                             }
                         }
                         wd.tracks.remove(name); saveToConfig(); sender.sendMessage(ChatColor.YELLOW + "Deleted: " + name); removeSignsFor(w, name); return true;
+                    }
+                    if (op.equals("info")) {
+                        String name = joinArgs(args, 2); if (name.isBlank()) { sender.sendMessage(ChatColor.RED + "Track name required."); return true; }
+                        Track t = wd.tracks.get(name); if (t == null) { sender.sendMessage(ChatColor.RED + "No such track."); return true; }
+                        sendTrackInfo(sender, w, t);
+                        return true;
                     }
                     sender.sendMessage(ChatColor.RED + "Unknown tracks subcommand."); return true;
                 }
@@ -177,6 +194,36 @@ public class RaceChrono extends JavaPlugin implements Listener {
                     Track t = getWD(p.getWorld().getName()).tracks.get(name); if (t == null) { sender.sendMessage(ChatColor.RED + "No such track."); return true; }
                     if (!isOwnerOrAdmin(p, t)) { p.sendMessage(ChatColor.RED + "You must own this track or be admin."); return true; }
                     t.splits.clear(); saveToConfig(); sender.sendMessage(ChatColor.YELLOW + "Cleared splits for " + name); return true;
+                }
+                case "setdesc" -> {
+                    if (!(sender instanceof Player p)) { sender.sendMessage("Players only"); return true; }
+                    if (!canEdit(p)) { p.sendMessage(ChatColor.RED + "No permission."); return true; }
+                    if (args.length < 2) { p.sendMessage(ChatColor.RED + "Usage: /rc setdesc <track...> | <description>"); return true; }
+                    String raw = joinArgs(args, 1);
+                    int pipe = raw.indexOf('|');
+                    if (pipe < 0) { p.sendMessage(ChatColor.RED + "Separate track and description with |"); return true; }
+                    String name = raw.substring(0, pipe).trim();
+                    String desc = raw.substring(pipe + 1).trim();
+                    if (name.isEmpty()) { p.sendMessage(ChatColor.RED + "Track name required."); return true; }
+                    if (desc.isEmpty()) { p.sendMessage(ChatColor.RED + "Description cannot be empty."); return true; }
+                    if (desc.length() > 120) { p.sendMessage(ChatColor.RED + "Description too long (max 120 chars)."); return true; }
+                    Track t = getWD(p.getWorld().getName()).tracks.get(name); if (t == null) { p.sendMessage(ChatColor.RED + "No such track."); return true; }
+                    if (!isOwnerOrAdmin(p, t)) { p.sendMessage(ChatColor.RED + "You must own this track or be admin."); return true; }
+                    t.description = desc;
+                    saveToConfig();
+                    p.sendMessage(ChatColor.GREEN + "Description updated for " + name);
+                    return true;
+                }
+                case "cleardesc" -> {
+                    if (!(sender instanceof Player p)) { sender.sendMessage("Players only"); return true; }
+                    if (!canEdit(p)) { p.sendMessage(ChatColor.RED + "No permission."); return true; }
+                    String name = (args.length >= 2) ? joinArgs(args, 1) : null; if (name == null) { sender.sendMessage(ChatColor.RED + "Track name required."); return true; }
+                    Track t = getWD(p.getWorld().getName()).tracks.get(name); if (t == null) { sender.sendMessage(ChatColor.RED + "No such track."); return true; }
+                    if (!isOwnerOrAdmin(p, t)) { p.sendMessage(ChatColor.RED + "You must own this track or be admin."); return true; }
+                    t.description = null;
+                    saveToConfig();
+                    sender.sendMessage(ChatColor.YELLOW + "Cleared description for " + name);
+                    return true;
                 }
                 case "setstartline" -> {
                     if (!(sender instanceof Player p)) { sender.sendMessage("Players only"); return true; }
@@ -300,6 +347,7 @@ public class RaceChrono extends JavaPlugin implements Listener {
     private Track getCurrentTrack(Player p){ String tn = activeTrack.get(p.getUniqueId()); if (tn == null) return null; WorldData wd = worlds.get(p.getWorld().getName()); if (wd == null) return null; return wd.tracks.get(tn); }
 
     private void startRun(Player p, String trackName) {
+        if (!p.hasPermission("racechrono.use")) { p.sendMessage(ChatColor.RED + "You do not have permission to participate in races."); return; }
         java.util.UUID id = p.getUniqueId();
         activeStartsMs.put(id, System.currentTimeMillis());
         activeStartsNano.put(id, System.nanoTime());
@@ -316,10 +364,24 @@ public class RaceChrono extends JavaPlugin implements Listener {
         stopActionBar(id); removeSidebar(p);
         if (start == null) return;
         long elapsed = System.currentTimeMillis() - start;
+        Long previousBest = t.bestMs;
         t.latestMs = elapsed; t.latestHolder = p.getName();
-        p.sendMessage(ChatColor.AQUA + "Finish (" + trackName + ")! Time: " + ChatColor.GOLD + formatTime(elapsed));
-        for (Player pl : Bukkit.getOnlinePlayers()) pl.sendMessage(ChatColor.AQUA + p.getName() + " — " + formatTime(elapsed) + " (" + trackName + ")");
-        if (t.bestMs == null || elapsed < t.bestMs) { t.bestMs = elapsed; t.bestHolder = p.getName(); p.sendTitle(ChatColor.GOLD + "New Best (" + trackName + ")!", ChatColor.WHITE + formatTime(elapsed), 10, 40, 10); }
+        String deltaText = (previousBest == null) ? "" : ChatColor.GRAY + " (" + formatDelta(elapsed - previousBest) + ChatColor.GRAY + " vs best)";
+        p.sendMessage(ChatColor.AQUA + "Finish (" + trackName + ")! Time: " + ChatColor.GOLD + formatTime(elapsed) + deltaText);
+        boolean newRecord = previousBest == null || elapsed < previousBest;
+        for (Player pl : Bukkit.getOnlinePlayers()) {
+            StringBuilder msg = new StringBuilder();
+            msg.append(ChatColor.AQUA).append(p.getName()).append(" — ").append(ChatColor.GOLD).append(formatTime(elapsed)).append(ChatColor.GRAY).append(" (").append(trackName).append(")");
+            if (newRecord) {
+                msg.append(ChatColor.GOLD).append(" [New PB");
+                if (previousBest != null) msg.append(" ").append(formatDelta(elapsed - previousBest));
+                msg.append(ChatColor.GOLD).append("]");
+            } else if (previousBest != null) {
+                msg.append(ChatColor.GRAY).append(" [").append(formatDelta(elapsed - previousBest)).append(ChatColor.GRAY).append("]");
+            }
+            pl.sendMessage(msg.toString());
+        }
+        if (newRecord) { t.bestMs = elapsed; t.bestHolder = p.getName(); p.sendTitle(ChatColor.GOLD + "New Best (" + trackName + ")!", ChatColor.WHITE + formatTime(elapsed), 10, 40, 10); }
         t.top.add(new ScoreRow(p.getName(), elapsed)); t.top.sort(java.util.Comparator.comparingLong(s -> s.ms)); if (t.top.size() > 10) t.top = new java.util.ArrayList<>(t.top.subList(0, 10));
         saveToConfig(); refreshSignsFor(p.getWorld().getName(), trackName);
     }
@@ -341,6 +403,8 @@ public class RaceChrono extends JavaPlugin implements Listener {
 
     private String formatTime(double seconds){ int p = displayPrecision; if (p<=1) return String.format(java.util.Locale.US,"%.1fs",seconds); if (p==2) return String.format(java.util.Locale.US,"%.2fs",seconds); return String.format(java.util.Locale.US,"%.3fs",seconds); }
     private String formatTime(long ms){ return formatTime(ms/1000.0); }
+    private String formatDeltaSeconds(double delta){ ChatColor color = delta < 0 ? ChatColor.GREEN : (delta > 0 ? ChatColor.RED : ChatColor.GRAY); String sign = delta == 0 ? "±" : (delta > 0 ? "+" : "-"); return color + sign + formatTime(Math.abs(delta)); }
+    private String formatDelta(long deltaMs){ return formatDeltaSeconds(deltaMs/1000.0); }
 
     // Sidebar
     private void createSidebar(Player p, String track) {
@@ -363,7 +427,10 @@ public class RaceChrono extends JavaPlugin implements Listener {
             int lap = lapCount.getOrDefault(p.getUniqueId(), 0);
             obj.getScore(ChatColor.WHITE + "Lap: " + ChatColor.AQUA + lap + "/" + t.laps).setScore(5);
         }
-        if (t != null && t.bestMs != null) obj.getScore(ChatColor.WHITE + "PB: " + ChatColor.AQUA + formatTime(t.bestMs)).setScore(4);
+        if (t != null && t.bestMs != null) {
+            obj.getScore(ChatColor.WHITE + "PB: " + ChatColor.AQUA + formatTime(t.bestMs)).setScore(4);
+            obj.getScore(ChatColor.WHITE + "Δ Best: " + formatDeltaSeconds(secs - (t.bestMs / 1000.0))).setScore(3);
+        }
     }
     private void removeSidebar(Player p){ boards.remove(p.getUniqueId()); objectives.remove(p.getUniqueId()); ScoreboardManager m=Bukkit.getScoreboardManager(); if (m!=null) p.setScoreboard(m.getMainScoreboard()); }
 
@@ -407,6 +474,46 @@ public class RaceChrono extends JavaPlugin implements Listener {
     }
     private String topEntry(int rank, java.util.List<ScoreRow> list, int idx){ if (idx>=list.size()) return ""; ScoreRow s=list.get(idx); String name=s.player; if (name.length()>12) name=name.substring(0,12); return ChatColor.GOLD + "" + rank + ") " + ChatColor.WHITE + name + ChatColor.GRAY + " " + formatTime(s.ms); }
     private void removeSignsFor(String world, String track){ java.util.List<SignBinding> list=signBindings.get(world); if (list==null) return; list.removeIf(sb -> sb.track.equals(track)); saveToConfig(); }
+
+    private String summaryLine(Track t){
+        StringBuilder sb = new StringBuilder();
+        sb.append(ChatColor.GOLD).append("- ").append(t.name);
+        java.util.List<String> bits = new java.util.ArrayList<>();
+        bits.add(t.mode == Mode.CIRCUIT ? "Circuit" : "P2P");
+        if (t.mode == Mode.CIRCUIT) bits.add(t.laps + " laps");
+        if (!t.splits.isEmpty()) bits.add(t.splits.size() + " splits");
+        if (t.bestMs != null) bits.add("PB " + formatTime(t.bestMs));
+        if (!bits.isEmpty()) {
+            sb.append(ChatColor.GRAY).append(" [");
+            for (int i = 0; i < bits.size(); i++) {
+                if (i > 0) sb.append(ChatColor.GRAY).append(", ");
+                sb.append(ChatColor.WHITE).append(bits.get(i));
+            }
+            sb.append(ChatColor.GRAY).append("]");
+        }
+        return sb.toString();
+    }
+
+    private void sendTrackInfo(org.bukkit.command.CommandSender sender, String world, Track t){
+        sender.sendMessage(ChatColor.AQUA + "Track info — " + ChatColor.GOLD + t.name + ChatColor.GRAY + " (" + world + ")");
+        if (t.description != null && !t.description.isBlank()) sender.sendMessage(ChatColor.DARK_GRAY + t.description);
+        sender.sendMessage(ChatColor.WHITE + "Mode: " + ChatColor.AQUA + (t.mode == Mode.CIRCUIT ? "Circuit" : "P2P"));
+        if (t.mode == Mode.CIRCUIT) sender.sendMessage(ChatColor.WHITE + "Laps: " + ChatColor.AQUA + t.laps);
+        sender.sendMessage(ChatColor.WHITE + "Splits: " + (t.splits.isEmpty() ? ChatColor.GRAY + "—" : ChatColor.AQUA + String.valueOf(t.splits.size())));
+        sender.sendMessage(ChatColor.WHITE + "Start line: " + (t.startLine == null ? ChatColor.GRAY + "—" : ChatColor.AQUA + "set"));
+        sender.sendMessage(ChatColor.WHITE + "Finish line: " + (t.finishLine == null ? ChatColor.GRAY + "—" : ChatColor.AQUA + "set"));
+        if (t.mode == Mode.CIRCUIT) sender.sendMessage(ChatColor.WHITE + "Gate: " + (t.gate == null ? ChatColor.GRAY + "—" : ChatColor.AQUA + "set"));
+        if (t.owner != null) {
+            org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(t.owner);
+            String ownerName = op.getName() != null ? op.getName() : t.owner.toString();
+            sender.sendMessage(ChatColor.WHITE + "Owner: " + ChatColor.AQUA + ownerName);
+        }
+        String best = (t.bestMs == null) ? ChatColor.GRAY + "—" : ChatColor.AQUA + formatTime(t.bestMs) + (t.bestHolder == null ? "" : ChatColor.GRAY + " by " + t.bestHolder);
+        String latest = (t.latestMs == null) ? ChatColor.GRAY + "—" : ChatColor.AQUA + formatTime(t.latestMs) + (t.latestHolder == null ? "" : ChatColor.GRAY + " by " + t.latestHolder);
+        sender.sendMessage(ChatColor.WHITE + "Best: " + best);
+        sender.sendMessage(ChatColor.WHITE + "Latest: " + latest);
+        if (!t.top.isEmpty()) sender.sendMessage(ChatColor.WHITE + "Leaderboard entries: " + ChatColor.AQUA + t.top.size());
+    }
 
     // Particles (chequered flags)
     private void renderAllLineParticles(){
@@ -531,13 +638,15 @@ public class RaceChrono extends JavaPlugin implements Listener {
                 if (ts != null) for (String tname : ts.getKeys(false)) {
                     ConfigurationSection tsec = ts.getConfigurationSection(tname);
                     Track t = new Track(tname);
-                    if (tsec != null) {
-                        String ownerStr = tsec.getString("owner", null); if (ownerStr != null) try { t.owner = java.util.UUID.fromString(ownerStr); } catch (Exception ignored){}
-                        t.mode = Mode.valueOf(tsec.getString("mode", "P2P"));
-                        if (tsec.contains("startLine")) {
-                            ConfigurationSection s = tsec.getConfigurationSection("startLine");
-                            t.startLine = new LineGate(wname, s.getInt("x1"), s.getInt("y1"), s.getInt("z1"), s.getInt("x2"), s.getInt("y2"), s.getInt("z2"));
-                        }
+                        if (tsec != null) {
+                            String ownerStr = tsec.getString("owner", null); if (ownerStr != null) try { t.owner = java.util.UUID.fromString(ownerStr); } catch (Exception ignored){}
+                            t.mode = Mode.valueOf(tsec.getString("mode", "P2P"));
+                            t.description = tsec.getString("description", null);
+                            if (t.description != null) { t.description = t.description.trim(); if (t.description.isBlank()) t.description = null; }
+                            if (tsec.contains("startLine")) {
+                                ConfigurationSection s = tsec.getConfigurationSection("startLine");
+                                t.startLine = new LineGate(wname, s.getInt("x1"), s.getInt("y1"), s.getInt("z1"), s.getInt("x2"), s.getInt("y2"), s.getInt("z2"));
+                            }
                         if (tsec.contains("finishLine")) {
                             ConfigurationSection s = tsec.getConfigurationSection("finishLine");
                             t.finishLine = new LineGate(wname, s.getInt("x1"), s.getInt("y1"), s.getInt("z1"), s.getInt("x2"), s.getInt("y2"), s.getInt("z2"));
@@ -598,6 +707,7 @@ public class RaceChrono extends JavaPlugin implements Listener {
                 String base = "worlds." + wname + ".tracks." + t.name;
                 c.set(base + ".owner", t.owner == null ? null : t.owner.toString());
                 c.set(base + ".mode", t.mode.name());
+                c.set(base + ".description", (t.description == null || t.description.isBlank()) ? null : t.description);
                 if (t.startLine != null) {
                     c.set(base + ".startLine.x1", t.startLine.getX1()); c.set(base + ".startLine.y1", t.startLine.getY1()); c.set(base + ".startLine.z1", t.startLine.getZ1());
                     c.set(base + ".startLine.x2", t.startLine.getX2()); c.set(base + ".startLine.y2", t.startLine.getY2()); c.set(base + ".startLine.z2", t.startLine.getZ2());
@@ -631,110 +741,6 @@ public class RaceChrono extends JavaPlugin implements Listener {
                 c.set(base + ".mode", sb.mode.name()); c.set(base + ".track", sb.track);
                 c.set(base + ".x", sb.pos.x); c.set(base + ".y", sb.pos.y); c.set(base + ".z", sb.pos.z);
             }
-        }
-        c.set("displayPrecision", displayPrecision);
-        c.set("maxRaceTimeSeconds", (int)(maxRaceMs/1000L));
-        saveConfig();
-    }
-
-    // Particles
-    private void renderAllLineParticles(){
-        if (!particleRenderer.isAvailable()) return;
-        for (java.util.Map.Entry<String, WorldData> we : worlds.entrySet()) {
-            World w = Bukkit.getWorld(we.getKey()); if (w==null) continue;
-            for (Track t : we.getValue().tracks.values()) { if (t.startLine != null) renderChequered(w,t.startLine); if (t.finishLine != null) renderChequered(w,t.finishLine); }
-        }
-    }
-    private void renderChequered(World w, LineGate g){
-        int x1=g.getX1(), y1=g.getY1(), z1=g.getZ1(); int x2=g.getX2(), y2=g.getY2(), z2=g.getZ2();
-        int minY=Math.min(y1,y2), maxY=Math.max(y1,y2);
-        if (x1==x2){
-            int x=x1; int minZ=Math.min(z1,z2), maxZ=Math.max(z1,z2);
-            for (int z=minZ; z<=maxZ; z++) for (int y=minY; y<=maxY; y++){
-                particleRenderer.spawnChequer(w, x+0.5, y+0.5, z+0.5, ((z+y)%2==0));
-            }
-        } else {
-            int z=z1; int minX=Math.min(x1,x2), maxX=Math.max(x1,x2);
-            for (int x=minX; x<=maxX; x++) for (int y=minY; y<=maxY; y++){
-                particleRenderer.spawnChequer(w, x+0.5, y+0.5, z+0.5, ((x+y)%2==0));
-            }
-        }
-    }
-
-    private void startActionBar(java.util.UUID id, Player p){
-        stopActionBar(id);
-        BukkitTask task = Bukkit.getScheduler().runTaskTimer(this, () -> {
-            Long nano = activeStartsNano.get(id); if (nano==null) return;
-            double seconds = (System.nanoTime() - nano) / 1_000_000_000.0;
-            p.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(ChatColor.GREEN + formatTime(seconds)));
-            updateSidebar(p, getCurrentTrack(p));
-            Long startMs = activeStartsMs.get(id);
-            if (startMs!=null && System.currentTimeMillis() - startMs > maxRaceMs) { p.sendMessage(ChatColor.RED + "Run cancelled (timeout)."); cancelRun(p); }
-        }, 0L, 2L);
-        actionBarTasks.put(id, task);
-    }
-
-    private String formatTime(double seconds){
-        int p = displayPrecision;
-        if (p<=1) return String.format(java.util.Locale.US,"%.1fs",seconds);
-        if (p==2) return String.format(java.util.Locale.US,"%.2fs",seconds);
-        return String.format(java.util.Locale.US,"%.3fs",seconds);
-    }
-    private String formatTime(long ms){ return formatTime(ms/1000.0); }
-
-    private void createSidebar(Player p, String track){
-        removeSidebar(p);
-        ScoreboardManager mgr=Bukkit.getScoreboardManager(); if (mgr==null) return;
-        Scoreboard board=mgr.getNewScoreboard(); Objective obj=board.registerNewObjective("racechrono","dummy", ChatColor.GOLD + "RaceChrono"); obj.setDisplaySlot(DisplaySlot.SIDEBAR);
-        boards.put(p.getUniqueId(), board); objectives.put(p.getUniqueId(), obj); p.setScoreboard(board); updateSidebar(p, getWD(p.getWorld().getName()).tracks.get(track));
-    }
-    private void updateSidebar(Player p, Track t){
-        Objective obj=objectives.get(p.getUniqueId()); Scoreboard board=boards.get(p.getUniqueId()); if (obj==null||board==null) return;
-        for (String e : new java.util.ArrayList<>(board.getEntries())) board.resetScores(e);
-        String trackName=(t==null)?"(none)":t.name;
-        obj.getScore(ChatColor.YELLOW + trackName).setScore(8);
-        Long nano=activeStartsNano.get(p.getUniqueId()); double secs=(nano==null)?0.0:(System.nanoTime()-nano)/1_000_000_000.0;
-        obj.getScore(ChatColor.WHITE + "Time: " + ChatColor.AQUA + formatTime(secs)).setScore(7);
-        if (t!=null && !t.splits.isEmpty()){ int idx=splitIndex.getOrDefault(p.getUniqueId(),0); obj.getScore(ChatColor.WHITE + "Split: " + ChatColor.AQUA + idx + "/" + t.splits.size()).setScore(6); }
-        if (t!=null && t.mode==Mode.CIRCUIT){ int lap=lapCount.getOrDefault(p.getUniqueId(),0); obj.getScore(ChatColor.WHITE + "Lap: " + ChatColor.AQUA + lap + "/" + t.laps).setScore(5); }
-        if (t!=null && t.bestMs!=null) obj.getScore(ChatColor.WHITE + "PB: " + ChatColor.AQUA + formatTime(t.bestMs)).setScore(4);
-    }
-    private void removeSidebar(Player p){ boards.remove(p.getUniqueId()); objectives.remove(p.getUniqueId()); ScoreboardManager m=Bukkit.getScoreboardManager(); if (m!=null) p.setScoreboard(m.getMainScoreboard()); }
-
-    private boolean showBest(org.bukkit.command.CommandSender sender, String[] args){
-        String w=(sender instanceof Player p)?p.getWorld().getName():Bukkit.getWorlds().get(0).getName(); WorldData wd=getWD(w);
-        String name=(args.length>=2)?joinArgs(args,1):null; if (name==null||!wd.tracks.containsKey(name)){ sender.sendMessage(ChatColor.RED + "No such track."); return true; }
-        Track t=wd.tracks.get(name); String best=(t.bestMs==null)?"—":formatTime(t.bestMs); String holder=(t.bestHolder==null)?"":(" by "+t.bestHolder);
-        sender.sendMessage(ChatColor.AQUA + "Best ("+name+"): " + ChatColor.GOLD + best + ChatColor.GRAY + holder); return true;
-    }
-    private boolean showTop(org.bukkit.command.CommandSender sender, String[] args){
-        String w=(sender instanceof Player p)?p.getWorld().getName():Bukkit.getWorlds().get(0).getName(); WorldData wd=getWD(w);
-        String name=(args.length>=2)?joinArgs(args,1):null; if (name==null||!wd.tracks.containsKey(name)){ sender.sendMessage(ChatColor.RED + "No such track."); return true; }
-        Track t=wd.tracks.get(name); sender.sendMessage(ChatColor.YELLOW + "Top 10 — " + name); if (t.top.isEmpty()){ sender.sendMessage(ChatColor.GRAY + "(no entries yet)"); return true; }
-        int rank=1; for (ScoreRow s : t.top){ sender.sendMessage(ChatColor.GOLD + ""+rank+". " + ChatColor.WHITE + s.player + ChatColor.GRAY + " — " + ChatColor.AQUA + formatTime(s.ms)); if (++rank>10) break; } return true;
-    }
-
-    private WorldData getWD(String world){ return worlds.computeIfAbsent(world, w -> new WorldData()); }
-
-    private void saveToConfig(){
-        FileConfiguration c=getConfig(); c.set("worlds", null);
-        for (java.util.Map.Entry<String, WorldData> we : worlds.entrySet()){
-            String wname=we.getKey(); WorldData wd=we.getValue();
-            for (Track t : wd.tracks.values()){
-                String base="worlds."+wname+".tracks."+t.name;
-                c.set(base+".owner", t.owner==null?null:t.owner.toString());
-                c.set(base+".mode", t.mode.name());
-                if (t.startLine!=null){ c.set(base+".startLine.x1", t.startLine.getX1()); c.set(base+".startLine.y1", t.startLine.getY1()); c.set(base+".startLine.z1", t.startLine.getZ1()); c.set(base+".startLine.x2", t.startLine.getX2()); c.set(base+".startLine.y2", t.startLine.getY2()); c.set(base+".startLine.z2", t.startLine.getZ2()); }
-                if (t.finishLine!=null){ c.set(base+".finishLine.x1", t.finishLine.getX1()); c.set(base+".finishLine.y1", t.finishLine.getY1()); c.set(base+".finishLine.z1", t.finishLine.getZ1()); c.set(base+".finishLine.x2", t.finishLine.getX2()); c.set(base+".finishLine.y2", t.finishLine.getY2()); c.set(base+".finishLine.z2", t.finishLine.getZ2()); }
-                if (t.gate!=null){ var b=t.gate.box(); c.set(base+".gate.minX",b.getMinX()); c.set(base+".gate.minY",b.getMinY()); c.set(base+".gate.minZ",b.getMinZ()); c.set(base+".gate.maxX",b.getMaxX()); c.set(base+".gate.maxY",b.getMaxY()); c.set(base+".gate.maxZ",b.getMaxZ()); }
-                if (!t.splits.isEmpty()){ int i=0; for (Region r : t.splits){ var b=r.box(); String sb=base+".splits."+ (i++); c.set(sb+".minX",b.getMinX()); c.set(sb+".minY",b.getMinY()); c.set(sb+".minZ",b.getMinZ()); c.set(sb+".maxX",b.getMaxX()); c.set(sb+".maxY",b.getMaxY()); c.set(sb+".maxZ",b.getMaxZ()); } } else c.set(base+".splits", null);
-                c.set(base+".laps", t.laps); c.set(base+".best", t.bestMs); c.set(base+".bestHolder", t.bestHolder); c.set(base+".latest", t.latestMs); c.set(base+".latestHolder", t.latestHolder);
-                java.util.List<String> lines=t.top.stream().map(s->s.player+":"+s.ms).collect(java.util.stream.Collectors.toList()); c.set(base+".leaderboard", lines);
-            }
-        }
-        c.set("signs", null);
-        for (java.util.Map.Entry<String, java.util.List<SignBinding>> e : signBindings.entrySet()){
-            String world=e.getKey(); int i=0; for (SignBinding sb : e.getValue()){ String base="signs."+world+"."+ (i++); c.set(base+".mode", sb.mode.name()); c.set(base+".track", sb.track); c.set(base+".x", sb.pos.x); c.set(base+".y", sb.pos.y); c.set(base+".z", sb.pos.z); }
         }
         c.set("displayPrecision", displayPrecision);
         c.set("maxRaceTimeSeconds", (int)(maxRaceMs/1000L));
