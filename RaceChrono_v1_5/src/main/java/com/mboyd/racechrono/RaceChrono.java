@@ -66,7 +66,9 @@ public class RaceChrono extends JavaPlugin implements Listener {
         saveDefaultConfig();
         loadFromConfig();
         getServer().getPluginManager().registerEvents(this, this);
-        // Particle effects are disabled to remain compatible with servers lacking org.bukkit.Particle.
+        // Particle render
+        Bukkit.getScheduler().runTaskTimer(this, this::renderAllLineParticles, 20L, 20L);
+
         Objects.requireNonNull(getCommand("racechrono")).setExecutor((sender, cmd, label, args) -> {
             if (args.length == 0 || args[0].equalsIgnoreCase("help")) {
                 sender.sendMessage(ChatColor.YELLOW + "RaceChrono v1.5 — /rc help");
@@ -509,6 +511,37 @@ public class RaceChrono extends JavaPlugin implements Listener {
         sender.sendMessage(ChatColor.WHITE + "Best: " + best);
         sender.sendMessage(ChatColor.WHITE + "Latest: " + latest);
         if (!t.top.isEmpty()) sender.sendMessage(ChatColor.WHITE + "Leaderboard entries: " + ChatColor.AQUA + t.top.size());
+    }
+
+    // Particles (chequered flags)
+    private void renderAllLineParticles(){
+        for (java.util.Map.Entry<String, WorldData> we : worlds.entrySet()) {
+            World w = Bukkit.getWorld(we.getKey()); if (w==null) continue;
+            for (Track t : we.getValue().tracks.values()) {
+                if (t.startLine != null) renderChequered(w, t.startLine);
+                if (t.finishLine != null) renderChequered(w, t.finishLine);
+            }
+        }
+    }
+    private void renderChequered(World w, LineGate g){
+        int x1=g.getX1(), y1=g.getY1(), z1=g.getZ1();
+        int x2=g.getX2(), y2=g.getY2(), z2=g.getZ2();
+        int minY=Math.min(y1,y2), maxY=Math.max(y1,y2);
+        if (x1==x2){
+            int x=x1; int minZ=Math.min(z1,z2), maxZ=Math.max(z1,z2);
+            for (int z=minZ; z<=maxZ; z++) for (int y=minY; y<=maxY; y++) {
+                boolean white = ((z + y) % 2 == 0);
+                Particle.DustOptions dust = new Particle.DustOptions(white ? Color.WHITE : Color.BLACK, 1.2F);
+                w.spawnParticle(Particle.REDSTONE, x+0.5, y+0.5, z+0.5, 1, 0,0,0, 0, dust, true);
+            }
+        } else {
+            int z=z1; int minX=Math.min(x1,x2), maxX=Math.max(x1,x2);
+            for (int x=minX; x<=maxX; x++) for (int y=minY; y<=maxY; y++) {
+                boolean white = ((x + y) % 2 == 0);
+                Particle.DustOptions dust = new Particle.DustOptions(white ? Color.WHITE : Color.BLACK, 1.2F);
+                w.spawnParticle(Particle.REDSTONE, x+0.5, y+0.5, z+0.5, 1, 0,0,0, 0, dust, true);
+            }
+        }
     }
 
     private boolean showBest(org.bukkit.command.CommandSender sender, String[] args){
