@@ -58,8 +58,6 @@ public class RaceChrono extends JavaPlugin implements Listener {
     private final java.util.Map<java.util.UUID, Scoreboard> boards = new java.util.HashMap<>();
     private final java.util.Map<java.util.UUID, Objective> objectives = new java.util.HashMap<>();
 
-    private final ParticleRenderer particleRenderer = ParticleRenderer.create();
-
     private final java.util.Map<java.util.UUID, org.bukkit.Location> pendingStart1 = new java.util.HashMap<>();
     private final java.util.Map<java.util.UUID, org.bukkit.Location> pendingFinish1 = new java.util.HashMap<>();
     private final java.util.Map<String, java.util.List<SignBinding>> signBindings = new java.util.HashMap<>();
@@ -517,7 +515,6 @@ public class RaceChrono extends JavaPlugin implements Listener {
 
     // Particles (chequered flags)
     private void renderAllLineParticles(){
-        if (!particleRenderer.isAvailable()) return;
         for (java.util.Map.Entry<String, WorldData> we : worlds.entrySet()) {
             World w = Bukkit.getWorld(we.getKey()); if (w==null) continue;
             for (Track t : we.getValue().tracks.values()) {
@@ -533,68 +530,16 @@ public class RaceChrono extends JavaPlugin implements Listener {
         if (x1==x2){
             int x=x1; int minZ=Math.min(z1,z2), maxZ=Math.max(z1,z2);
             for (int z=minZ; z<=maxZ; z++) for (int y=minY; y<=maxY; y++) {
-                particleRenderer.spawnChequer(w, x + 0.5, y + 0.5, z + 0.5, ((z + y) % 2 == 0));
+                boolean white = ((z + y) % 2 == 0);
+                Particle.DustOptions dust = new Particle.DustOptions(white ? Color.WHITE : Color.BLACK, 1.2F);
+                w.spawnParticle(Particle.REDSTONE, x+0.5, y+0.5, z+0.5, 1, 0,0,0, 0, dust, true);
             }
         } else {
             int z=z1; int minX=Math.min(x1,x2), maxX=Math.max(x1,x2);
             for (int x=minX; x<=maxX; x++) for (int y=minY; y<=maxY; y++) {
-                particleRenderer.spawnChequer(w, x + 0.5, y + 0.5, z + 0.5, ((x + y) % 2 == 0));
-            }
-        }
-    }
-
-    private static final class ParticleRenderer {
-        private static final double OFFSET_VARIANCE = 0.0D;
-
-        private final java.lang.reflect.Method spawnParticle;
-        private final java.lang.reflect.Constructor<?> dustOptionsConstructor;
-        private final Object redstoneParticle;
-        private final Object whiteColor;
-        private final Object blackColor;
-
-        private ParticleRenderer(java.lang.reflect.Method spawnParticle,
-                                 java.lang.reflect.Constructor<?> dustOptionsConstructor,
-                                 Object redstoneParticle,
-                                 Object whiteColor,
-                                 Object blackColor) {
-            this.spawnParticle = spawnParticle;
-            this.dustOptionsConstructor = dustOptionsConstructor;
-            this.redstoneParticle = redstoneParticle;
-            this.whiteColor = whiteColor;
-            this.blackColor = blackColor;
-        }
-
-        static ParticleRenderer create() {
-            try {
-                Class<?> particleClass = Class.forName("org.bukkit.Particle");
-                Class<?> dustClass = Class.forName("org.bukkit.Particle$DustOptions");
-                Class<?> colorClass = Class.forName("org.bukkit.Color");
-                java.lang.reflect.Method spawn = World.class.getMethod("spawnParticle",
-                    particleClass, double.class, double.class, double.class, int.class,
-                    double.class, double.class, double.class, double.class, Object.class, boolean.class);
-                @SuppressWarnings("unchecked")
-                Object redstone = Enum.valueOf((Class<Enum>) particleClass, "REDSTONE");
-                java.lang.reflect.Constructor<?> ctor = dustClass.getConstructor(colorClass, float.class);
-                java.lang.reflect.Method fromRGB = colorClass.getMethod("fromRGB", int.class, int.class, int.class);
-                Object white = fromRGB.invoke(null, 255, 255, 255);
-                Object black = fromRGB.invoke(null, 0, 0, 0);
-                return new ParticleRenderer(spawn, ctor, redstone, white, black);
-            } catch (Throwable ignored) {
-                return new ParticleRenderer(null, null, null, null, null);
-            }
-        }
-
-        boolean isAvailable() {
-            return spawnParticle != null && dustOptionsConstructor != null && redstoneParticle != null && whiteColor != null && blackColor != null;
-        }
-
-        void spawnChequer(World world, double x, double y, double z, boolean white) {
-            if (!isAvailable()) return;
-            try {
-                Object dust = dustOptionsConstructor.newInstance(white ? whiteColor : blackColor, Float.valueOf(1.2F));
-                spawnParticle.invoke(world, redstoneParticle, x, y, z, 1, OFFSET_VARIANCE, OFFSET_VARIANCE, OFFSET_VARIANCE, 0.0D, dust, Boolean.TRUE);
-            } catch (Throwable ignored) {
-                // gracefully skip if particles are unavailable at runtime
+                boolean white = ((x + y) % 2 == 0);
+                Particle.DustOptions dust = new Particle.DustOptions(white ? Color.WHITE : Color.BLACK, 1.2F);
+                w.spawnParticle(Particle.REDSTONE, x+0.5, y+0.5, z+0.5, 1, 0,0,0, 0, dust, true);
             }
         }
     }
