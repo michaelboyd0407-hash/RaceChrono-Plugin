@@ -1,0 +1,5 @@
+# RaceChrono config (v1.4.0)
+maxRaceTimeSeconds: 240
+displayPrecision: 2  # 1..3 decimals for action bar
+worlds: {}
+signs: {}
